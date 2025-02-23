@@ -1,5 +1,5 @@
-#include "wrapper.h"
-
+#include "wrapper.hpp"
+	
 void die(const char * error_msg) {
 	perror(error_msg);
 	exit(1);
@@ -14,10 +14,10 @@ void *get_in_addr(struct sockaddr *sa) {
 	return &(((struct sockaddr_in6 *)sa)->sin6_addr);
 }
 
-int32_t read_full(int fd, char *buf, size_t n) {
+int32_t read_all(int fd, uint8_t *buf, size_t n) {
 	while (n > 0) {
-		ssize_t ret = recv(fd, buf, n, 0);
-		if (ret <= 0) {
+		ssize_t rv = recv(fd, buf, n, 0);
+		if (rv <= 0) {
 			if (errno)
 				perror("recv()");
 			else
@@ -25,21 +25,22 @@ int32_t read_full(int fd, char *buf, size_t n) {
 			return -1;
 		}
 		
-		if ((size_t)ret > n) {
+		if ((size_t)rv > n) {
 			fprintf(stderr, "recv() overflow\n");
 			return -1;
 		}
-		n -= (size_t)ret;
-		buf += ret;
+		
+		n -= (size_t)rv;
+		buf += rv;
 	}
 	
 	return 0;
 }
 
-int32_t write_all(int fd, const char *buf, size_t n) {
+int32_t write_all(int fd, uint8_t *buf, size_t n) {
 	while (n > 0) {
-		ssize_t ret = send(fd, buf, n, 0);
-		if (ret <= 0) {
+		ssize_t rv = send(fd, buf, n, 0);
+		if (rv <= 0) {
 			if (errno)
 				perror("send()");
 			else
@@ -47,12 +48,12 @@ int32_t write_all(int fd, const char *buf, size_t n) {
 			return -1;
 		}
 		
-		if ((size_t)ret > n) {
+		if ((size_t)rv > n) {
 			fprintf(stderr, "send() overflow\n");
 			return -1;
 		}
-		n -= (size_t)ret;
-		buf += ret;
+		n -= (size_t)rv;
+		buf += rv;
 	}
 	
 	return 0;
