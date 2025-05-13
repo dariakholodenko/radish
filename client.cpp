@@ -46,10 +46,102 @@ int send_req(int sockfd, const std::vector<std::string> &cmd) {
 	return write_all(sockfd, wbuf, HEADER_SIZE + msg_len);
 }
 
+static int32_t print_resp(const uint8_t *data, size_t size) {
+    if (size < 1) {
+        fprintf(stderr, "bad response\n");
+        return -1;
+    }
+    
+    switch (data[0]) {
+    case TAG_NIL:
+        printf("(nil)\n");
+        return 1;
+        
+    case TAG_ERR:
+        if (size < 1 + 2 * HEADER_SIZE) {
+            fprintf(stderr, "bad response\n");
+            return -1;
+        }
+        {
+            int32_t code = 0;
+            uint32_t len = 0;
+            memcpy(&code, &data[1], HEADER_SIZE);
+            memcpy(&len, &data[1 + HEADER_SIZE], HEADER_SIZE);
+            if (size < 1 + 2 * HEADER_SIZE + len) {
+                fprintf(stderr, "bad response\n");
+                return -1;
+            }
+            printf("(err) %d %.*s\n", code, len, &data[1 + 2 * HEADER_SIZE]);
+            return 1 + 8 + len;
+        }
+    case TAG_STR:
+        if (size < 1 + HEADER_SIZE) {
+            fprintf(stderr, "bad response\n");
+            return -1;
+        }
+        {
+            uint32_t len = 0;
+            memcpy(&len, &data[1], 4);
+            if (size < 1 + 4 + len) {
+                fprintf(stderr, "bad response\n");
+                return -1;
+            }
+            printf("(str) %.*s\n", len, &data[1 + 4]);
+            return 1 + 4 + len;
+        }
+    case TAG_INT:
+        if (size < 1 + 8) {
+            fprintf(stderr, "bad response\n");
+            return -1;
+        }
+        {
+            int64_t val = 0;
+            memcpy(&val, &data[1], 8);
+            printf("(int) %ld\n", val);
+            return 1 + 8;
+        }
+    case TAG_DBL:
+        if (size < 1 + 8) {
+            fprintf(stderr, "bad response\n");
+            return -1;
+        }
+        {
+            double val = 0;
+            memcpy(&val, &data[1], 8);
+            printf("(dbl) %g\n", val);
+            return 1 + 8;
+        }
+    case TAG_ARR:
+        if (size < 1 + 4) {
+            fprintf(stderr, "bad response\n");
+            return -1;
+        }
+        {
+            uint32_t len = 0;
+            memcpy(&len, &data[1], 4);
+            printf("(arr) len=%u\n", len);
+            size_t arr_bytes = 1 + 4;
+            for (uint32_t i = 0; i < len; ++i) {
+                int32_t rv = print_resp(&data[arr_bytes], size - arr_bytes);
+                if (rv < 0) {
+                    return rv;
+                }
+                arr_bytes += (size_t)rv;
+            }
+            printf("(arr) end\n");
+            return (int32_t)arr_bytes;
+        }
+    default:
+        fprintf(stderr, "bad response\n");
+        return -1;
+    }
+}
+
 int recv_resp(int sockfd) {
 	//get server's reply
 	uint8_t rbuf[HEADER_SIZE + MAX_MSG + 1];
-	int rv;
+	//reply's header
+	int32_t rv;
 	if ((rv = read_all(sockfd, rbuf, HEADER_SIZE)))
 		return rv;
 	
@@ -59,21 +151,28 @@ int recv_resp(int sockfd) {
 		fprintf(stderr, "message is too long, len: %lu, max_msg: %u\n", msg_len, MAX_MSG);
 		return -1;
 	}
-
+	
+	//reply's body
 	if ((rv = read_all(sockfd, &rbuf[HEADER_SIZE], msg_len)))
 		return rv;
-	
-	uint32_t rc = 0;
+
 	if (msg_len < HEADER_SIZE) {
 		fprintf(stderr, "bad response\n");
 		return -1;
 	}
 	
-	memmove(&rc, &rbuf[HEADER_SIZE], HEADER_SIZE);
-	rbuf[HEADER_SIZE + msg_len] = '\0';
-	printf("server says: [%u] %s\n", rc, &rbuf[2 * HEADER_SIZE]);
+	//print response
+	rv = print_resp((uint8_t *)&rbuf[HEADER_SIZE], msg_len);
+	if (rv > 0 && (uint32_t)rv != msg_len) {
+		fprintf(stderr, "bad response\n");
+		rv = -1;
+	}
+	//uint32_t rc = 0;
+	//memmove(&rc, &rbuf[HEADER_SIZE], HEADER_SIZE);
+	//rbuf[HEADER_SIZE + msg_len] = '\0';
+	//printf("server says: [%u] %s\n", rc, &rbuf[2 * HEADER_SIZE]);
 	
-	return 0;
+	return rv;
 }
 
 int main(int argc, char **argv) {

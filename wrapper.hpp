@@ -1,21 +1,23 @@
 #ifndef __SERV_CLIENT_H_
 #define __SERV_CLIENT_H_
 
+//C
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <string.h>
+#include <time.h> //clock_gettime() for better performance and poll() compatibility
 #include <unistd.h>
 
 //c++
+#include <algorithm> //remove()
+#include <cassert> //assert()
 #include <iostream>
-#include <vector>
-#include <string>
-#include <cassert> 
-#include <stdexcept> //out_of_range 
 #include <iterator> 
 #include <memory> //unique_ptr
-#include <unordered_map>
+#include <stdexcept> //out_of_range 
+#include <string>
+#include <vector>
 
 //networking
 #include <sys/types.h>
@@ -28,13 +30,39 @@
 #include <arpa/inet.h>
 
 //custom libraries
-#include "hashtable.hpp"
+#include "hashmap.hpp"
+#include "sortedset.hpp"
 
 #define PORT "1234"
 #define MAX_MSG 32
 #define HEADER_SIZE 4
 #define BUFF_CAPACITY 2*(HEADER_SIZE + MAX_MSG)
 #define HMAP_BASE_CAPACITY 128
+#define CONN_TIMEOUT 5000 //5000 ms
+#define IO_TIMEOUT 500
+#define MAX_EVENTLOOP_JOBS_PER_ITERATION 2000
+
+enum Tag : uint8_t {
+	TAG_NIL = 0, //nill
+	TAG_ERR = 1, //error code + msg
+	TAG_STR = 2, //string
+	TAG_INT = 3, //int64
+	TAG_DBL = 4, //double
+	TAG_ARR = 5, //array
+};
+
+enum Status : uint32_t {
+	RES_OK = 0,
+	RES_NODATA = 1, //no existing data
+	RES_NOCMD = 2, //command doesn't exist
+	RES_TOOLONG = 3, //request/response is too long
+};
+
+enum TTL {
+	NOTTL = -1,
+	EXPIRED = -2,
+	OK = 1,
+};
 
 template <typename T>
 class RingBuffer {
@@ -225,7 +253,23 @@ public:
 		return buffer_uptr->data();
 	}
 	
-	friend std::ostream& operator<<(std::ostream& out, const RingBuffer<T> buffer) {
+	void memcpy(size_t start, T *src, size_t len) {
+		if (!src)
+			throw std::out_of_range("RingBuffer::memmove: NULL passed");
+		
+		if (len > capacity - this->size())
+			throw std::out_of_range("RingBuffer::memmove: passed arg is too big");
+			
+		auto it = iterator(*this, start);
+		
+		for (size_t i = 0; i < len; i++) {
+			*it = *src;
+			it++;
+			src++;
+		}
+	}
+	
+	friend std::ostream& operator<<(std::ostream& out, const RingBuffer<T> &buffer) {
 		if (buffer.empty()) {
 			out << "\nbuffer is empty";
 		}
@@ -238,6 +282,131 @@ public:
 		
 		return out;
 	}
+};
+template <typename T>
+void append_helper(RingBuffer<uint8_t> &buffer, T val, size_t size) {
+	buffer.insert((const uint8_t *)&val, size);
+}
+
+struct Timer;
+
+struct Conn {
+	int fd;
+	//app's intention for the event loop
+	bool want_read;
+	bool want_write;
+	bool want_close;
+	
+	//buffered input and output
+	RingBuffer<uint8_t> incoming; //request to be parsed from the app
+	RingBuffer<uint8_t> outgoing; //response for the app
+	
+	//timer
+	Timer *timer;
+	
+	Conn(int fd) : fd(fd), want_read(false), 
+			want_write(false), want_close(false),
+			incoming(BUFF_CAPACITY), outgoing(BUFF_CAPACITY), 
+			timer(nullptr) {}
+	
+	void append_to_outgoing(size_t len) {
+		outgoing.insert(incoming.begin(), incoming.begin() + len);
+	}
+	
+	void append_to_incoming(std::vector<uint8_t>& buff, size_t len) {
+		incoming.insert(buff.begin(), buff.begin() + len);
+	}
+	
+	void consume_from_incoming(size_t len) {
+		incoming.erase_front(len);
+	}
+	
+	void consume_from_outgoing(size_t len) {
+		outgoing.erase_front(len);
+	}
+};
+
+struct Timer {
+	int time;
+	Conn *conn;
+	
+	Timer(Conn *conn) : conn(conn) {
+		struct timespec tv = {0, 0};
+		clock_gettime(CLOCK_MONOTONIC, &tv);
+		time = int(tv.tv_sec) * 1000 + tv.tv_nsec / 1000 / 1000;
+	}
+	
+	int first() {
+		return time;
+	}
+	
+	void set_time(int new_time) {
+		time = new_time;
+	}
+	
+	Conn *second() {
+		return conn;
+	}
+	
+	bool operator==(const Timer &second) const {
+		return (time == second.time) && (conn == second.conn);
+	}
+	
+	bool operator!=(const Timer &second) const {
+		return (time != second.time) || (conn != second.conn);
+	}
+};
+
+int get_monotonic_ms();
+
+struct Entry {
+	std::string key;
+	std::string value;
+	int heap_idx;
+	int ttl;
+	int expire_at;
+	
+	Entry(const std::string &key, const std::string &value, 
+		int idx = -1, int ttl = -1, int expire_at = -1) : 
+								key(key), value(value), heap_idx(idx), 
+								ttl(ttl), expire_at(expire_at) {}
+	
+	std::string &get_key() {
+		return key;
+	}
+	
+	void set_heap_idx(int idx) {
+		heap_idx = idx;
+	}
+	
+	int get_heap_idx() const {
+		return heap_idx;
+	}
+	
+	void set_ttl(int new_ttl, int new_expire_at) {
+		ttl = new_ttl;
+		expire_at = new_expire_at;
+	}
+	
+	int get_ttl() {
+		int now = get_monotonic_ms();
+		if (expire_at < now) {
+			ttl = EXPIRED;
+		}
+		else {
+			ttl = (expire_at - now) / 1000;
+		}
+		return ttl;
+	}
+		
+	bool operator==(const Entry &second) const {
+		return value == second.value;
+	} 
+	
+	bool operator!=(const Entry &second) const {
+		return value != second.value;
+	} 
+
 };
 
 void die(const char * error_msg);
