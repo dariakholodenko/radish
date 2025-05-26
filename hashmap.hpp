@@ -1,17 +1,17 @@
-#ifndef __HASHTABLE__
-#define __HASHTABLE__
+#ifndef __HASHTABLE_HPP__
+#define __HASHTABLE_HPP__
 
 #include <cassert> 
+#include <iostream>
+#include <memory> //unique_ptr, shared_ptr
 #include <new>
 #include <string>
-#include <memory> //unique_ptr
-#include <iostream>
 
-#define MAX_LOAD_FACTOR 3
-#define MAX_NUM_ELEMENTS_TO_MOVE 128
+constexpr size_t MAX_LOAD_FACTOR = 3;
+constexpr size_t MAX_NUM_ELEMENTS_TO_MOVE = 128;
 //default 32-bit fnv hash function basis and prime values
-#define FNV_OFFSET_BASIS 0x811c9dc5
-#define FNV_PRIME 0x01000193
+constexpr int FNV_OFFSET_BASIS = 0x811c9dc5;
+constexpr int FNV_PRIME = 0x01000193;
 
 /* HashMap consists of two HashTables to improve performance 
  * and prevent latency during rehash 
@@ -28,18 +28,25 @@ class HashMap {
 private:
 	class HashNode {
 	private:
-		T key;
+		/* we want to store ptr so that in case there're strings 
+		 * we could return string_view or shared_ptr 
+		 * instead of copying the string*/
+		std::shared_ptr<T> key;
 		P value;
 		HashNode *next;
 	
 	public:	
 		HashNode(const T &key, const P &value)
-			: key(key), value(value), next(nullptr) {}
-			
+			: key(std::make_shared<T>(key)), value(value), next(nullptr) {}
+		
 		const T &get_key() const {
-			return key;
+			return *key;
 		}
 		
+		std::shared_ptr<T>  get_key_ptr() {
+			return key;
+		}
+				
 		const P &get_value() const{
 			return value;
 		}
@@ -85,13 +92,14 @@ private:
 		~HashTable() {
 			clear();			
 			delete [] table;
+			table = nullptr;
 		}
 		
 		size_t hash_function(const T &key) {
 			//this hash function is FNV, non-cryptographic hash
 			size_t hash = FNV_OFFSET_BASIS;
-			uint8_t *arr = (uint8_t *)key.data();
-			size_t len = key.length() * sizeof(key[0]);
+			const uint8_t *arr = reinterpret_cast<const uint8_t *>(key.data());
+			size_t len = key.size();//key.length() * sizeof(key[0]);
 			
 			for (size_t i = 0; i < len; i ++) {
 				hash = hash ^ arr[i];
@@ -110,13 +118,12 @@ private:
 			return capacity;
 		}
 		
-		void insert(HashNode *node) {
-			if (!node)
-				return;
+		std::shared_ptr<T> insert(HashNode *node) {
+			assert(node);
 			
-			HashNode **check = search(node->get_key());
-			if (check) //node with a given key already exists
-				return;
+			//HashNode **check = search(node->get_key());
+			//if (check) //node with a given key already exists
+			//	return;
 				
 			size_t bucket_id = hash_function(node->get_key());
 			//if there's a collision just append new node 
@@ -125,6 +132,8 @@ private:
 			node->next = next;
 			table[bucket_id] = node;
 			size++;
+			
+			return node->get_key_ptr();
 		}
 		
 		HashNode **search(const T &key) {
@@ -140,6 +149,10 @@ private:
 		}
 		
 		HashNode *erase(const T &key) {
+			/* we're using a singly-linked list remove:
+			 * remove nodes by assigning the next node to to_remove's ptr
+			 * so that we don't need to change previous->next
+			 * and after that return the removed node to actually deallocate it*/
 			HashNode **to_remove;
 			if ((to_remove = this->search(key)) != nullptr) {
 				HashNode *node = *to_remove;
@@ -153,7 +166,7 @@ private:
 		}
 		
 		HashNode *erase(HashNode **to_remove) {
-			if (!to_remove)
+			if (!to_remove || !*to_remove)
 				return nullptr;
 			
 			return this->erase((*to_remove)->get_key());
@@ -213,7 +226,6 @@ private:
 		
 		rehashing_backup = htab; //assign the current newer version to the old one
 		size_t capacity = htab->get_capacity() * 2; //double the current size
-		//delete htab;
 		htab = new HashTable(capacity); //create larger htable
 		move_id = 0; 
 		
@@ -235,8 +247,8 @@ public:
 			return cur;
 		}
 		
-		const T &first() {
-			return cur->get_key();
+		std::shared_ptr<T> first() {
+			return cur->get_key_ptr();
 		}
 		
 		const P &second() {
@@ -311,9 +323,7 @@ public:
 		return node ? iterator(*node) : iterator(nullptr);
 	}
 	
-	void insert(const T &key, const P &value) {
-		htab->insert(new HashNode(key, value));
-		
+	std::shared_ptr<T> insert(const T &key, const P &value) {
 		if (!rehashing_backup || rehashing_backup->get_size() == 0) {
 			size_t load_factor = htab->get_size() / htab->get_capacity();
 			if (load_factor >= MAX_LOAD_FACTOR) { 
@@ -322,23 +332,22 @@ public:
 		}
 		
 		this->_move_elements();
+		
+		auto it = search(key);
+		//if a key already exists just override its value with a new one
+		if (it != this->end()) { 
+			it.set_second(value);
+			return it.first();
+		}
+			
+		return htab->insert(new HashNode(key, value));;
 	}
-	
-	//void erase(HashNode **node) {
-	//	if (!node)
-	//		return;
-	//		
-	//	rehashing_backup->erase(node);
-	//	htab->erase(node);
-	//	
-	//	this->_move_elements();
-	//}
 	
 	std::unique_ptr<P> erase(const T &key) {
 		this->_move_elements();
 		
 		HashNode **node = htab->search(key);
-		HashNode *to_remove;
+		HashNode *to_remove = nullptr;
 		
 		if (node) 
 			to_remove = htab->erase(node);
@@ -348,7 +357,7 @@ public:
 		}
 		
 		if (to_remove) {
-			std::unique_ptr<P> val = std::unique_ptr<P>(new P(to_remove->get_value()));
+			std::unique_ptr<P> val = std::make_unique<P>(to_remove->get_value());
 			delete to_remove;
 			to_remove = nullptr;
 			
