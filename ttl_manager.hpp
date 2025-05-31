@@ -2,6 +2,7 @@
 #define __TTL_MANAGER_HPP_
 
 //c++
+#include <memory> //unique_ptr
 #include <string>
 
 //custom
@@ -22,7 +23,9 @@ private:
 	
 public:
 	TTLManager(HashMap<std::string, std::string> &hmap);
-	
+	TTLManager(const TTLManager &) = delete;
+	TTLManager &operator=(const TTLManager &) = delete;
+
 	TTLStatus set(const std::string &key, int ttl_ms);
 	TTLStatus remove(const std::string &key);
 	int get_ttl(const std::string &key);
