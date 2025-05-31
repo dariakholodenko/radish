@@ -1,4 +1,4 @@
-This is a simple Redis-like In-Memory Database that supports point queries, range queries and TTL(time-to-live) operations.
+This is a simple Redis-like In-Memory Database that supports point queries, range queries and TTL (time-to-live) operations.
 
 How to Build & Run:
 Build: make
@@ -6,13 +6,13 @@ Run the server: ./main
 Connect to server: ./client <command>
 
 Supported commands:
-Point queries (HashMap-based):
+Point queries (HashMap - based):
 1. get <key> - retrieve a value for key, O(1) on average
 2. set <key> <value> - set a value for key, O(1) on average
 3. del <key> - remove key from the DB, O(1) on average
 
 TTL:
-1. expire <key> <ttl> - set a timeout(ttl) for key, O(logN) on average
+1. expire <key> <ttl> - set a timeout (ttl) for key, O(logN) on average
 2. ttl <key> - get the remaining ttl for key, O(1) on average
 3. persist <key> - remove the ttl to turn key to persistent, O(logN) on average
 
@@ -21,7 +21,7 @@ Range queries (Sorted Set - based):
 2. zrem <key> - remove (key, value) from the sorted set, O(logN) on average
 3. zrange <from> <offset> - get a list of at most <offset> keys starting <from>, O(logN + offset) on average
 
-Performance-Oriented Features:
+Performance - Oriented Features:
 1. Event Loop & Non-Blocking Sockets:
    The server handles concurrency using an event loop based on poll().
    All sockets are configured as non-blocking, preventing blocking on I/O operations and avoiding the overhead of thread context switching.
