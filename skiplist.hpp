@@ -34,10 +34,12 @@
  * 	Node  	   Node  	  Node  	 Node  	   Node  	  Node  	 Node  		
  * 
  * =====================================================================*/
-#include <stdexcept> //std::invalid_argument
+
+#include <iostream> 
+#include <stdexcept> //invalid_argument
 #include <limits> //infinity()
 #include <cstdlib> //rand(), srand()
-#include <ctime> //time() for srand()
+#include <random> //mt19937
 
 #define INFTY std::numeric_limits<T>::infinity()
 
@@ -110,6 +112,10 @@ private:
 		SkipNode *current_level;
 		SkipNode *current_node;
 		
+		SkipNode *get_current() const{
+			return current_node;
+		}
+		
 		public:
 		iterator(SkipNode *current_level, SkipNode *current_node): 
 			current_level(current_level), current_node(current_node) {}
@@ -121,11 +127,7 @@ private:
 		T* operator->() const {
 			return &current_node->key;
 		}
-		
-		SkipNode *get_current() const{
-			return current_node;
-		}
-		
+				
 		//prefix increment
 		//first move right to the end of the current level
 		//then move down to the beginning of the lower level
@@ -166,6 +168,7 @@ private:
 			return current_node == right.current_node;
 		}
 		
+		friend class SkipList;
 	};
 
 public:
@@ -244,6 +247,8 @@ public:
 	};
 
 private:
+	std::mt19937 rng;
+	std::bernoulli_distribution dist;
 	SkipNode *top;
 	
 	SkipNode *_add_after(const T &key, const P &value, size_t level, SkipNode *node) {
@@ -258,8 +263,7 @@ private:
 	//if 0: new node will be inserted to the next level or new level will be added
 	//if 1: not adding
 	bool _toss() {
-		srand(time(0));
-		return rand() % 2;
+		return dist(rng);
 	}
 	
 	SkipNode *_insert_rec(const T &key, const P &value, SkipNode *node) {
@@ -409,7 +413,14 @@ private:
 	}
 	
 public:	
-	SkipList(): top(new SkipNode(-INFTY)) {
+	SkipList()
+		: rng(std::random_device{}()), 
+								dist(0.5), top(new SkipNode(-INFTY)) {
+		/* generate a seed for future random sequences.
+		 * we have to generate it once and before the first _toss()
+		 * so rand() will return different numbers 
+		 * since it generates sequences based on its seed */
+		
 		top->next = new SkipNode(INFTY);
 		top->next->prev = top;
 	}
@@ -489,21 +500,21 @@ public:
 	
 	const T &search(const T &key) {
 		SkipNode *node = _lookup(key);
+		
 		return node->key;
 	}
 	
-	SkipNode *insert(const T &key, const P &value) {
+	void insert(const T &key, const P &value) {
 		SkipNode *node = top;
 		SkipNode *deeper;
 		deeper = _insert_rec(key, value, node);
 		
 		if (!deeper || _toss())
-			return top;
+			return;
 		
 		SkipNode *dummy = new SkipNode(INFTY, deeper->level + 1);
 		top = new SkipNode(-INFTY, deeper->level + 1, dummy, nullptr, top);
 		dummy->prev = top;
-		return top;
 	}
 	
 	void erase(const T &key) {
@@ -523,9 +534,8 @@ public:
 	
 	void erase(const T &key, const P &value) {
 		SkipNode *node = _lookup(key, value);
-		if (!node) {
+		if (!node)
 			return;
-		}
 			
 		//the node was found
 		while (node) {

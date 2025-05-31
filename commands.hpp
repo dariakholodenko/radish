@@ -20,6 +20,11 @@ struct CommandContext {
 	HashMap<std::string, std::string> &hmap;
 	TTLManager &ttl_manager;
 	SortSet &sset;
+	
+	 CommandContext(HashMap<std::string, std::string>& h,
+											TTLManager& ttl,
+											SortSet& s)
+						: hmap(h), ttl_manager(ttl), sset(s) {}
 };
 
 class Command {
@@ -94,6 +99,10 @@ private:
 	
 public:
 	CommandExecutor();
+	
+	CommandExecutor(const CommandExecutor &) = delete;
+    CommandExecutor &operator=(const CommandExecutor &) = delete;
+    
 	void do_query(const std::vector<std::string> &cmd, 
 										RingBuffer<uint8_t> &buffer);
 };

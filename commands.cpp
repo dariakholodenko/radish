@@ -19,7 +19,7 @@ void GetCommand::execute(const std::vector<std::string> &cmd,
 		throw std::invalid_argument("usage: get <key>");
 }
 
-/* GetCommand */
+/* SetCommand */
 void SetCommand::execute(const std::vector<std::string> &cmd, 
 			RingBuffer<uint8_t> &buffer, CommandContext &ctx) {
 	ctx.ttl_manager.process_expired();
@@ -33,7 +33,7 @@ void SetCommand::execute(const std::vector<std::string> &cmd,
 		throw std::invalid_argument("usage: set <key> <val>");
 }
 
-/* GetCommand */
+/* DelCommand */
 void DelCommand::execute(const std::vector<std::string> &cmd, 
 			RingBuffer<uint8_t> &buffer, CommandContext &ctx) {
 	ctx.ttl_manager.process_expired();
@@ -48,7 +48,7 @@ void DelCommand::execute(const std::vector<std::string> &cmd,
 		throw std::invalid_argument("usage: del <key>");
 }
 
-/* GetCommand */
+/* ExpireCommand */
 void ExpireCommand::execute(const std::vector<std::string> &cmd, 
 			RingBuffer<uint8_t> &buffer, CommandContext &ctx) {
 	ctx.ttl_manager.process_expired();
@@ -70,7 +70,7 @@ void ExpireCommand::execute(const std::vector<std::string> &cmd,
 		throw std::invalid_argument("usage: expire <key> <ttl>");
 }
 
-/* GetCommand */
+/* PersistCommand */
 void PersistCommand::execute(const std::vector<std::string> &cmd, 
 			RingBuffer<uint8_t> &buffer, CommandContext &ctx) {
 	ctx.ttl_manager.process_expired();
@@ -85,7 +85,7 @@ void PersistCommand::execute(const std::vector<std::string> &cmd,
 		throw std::invalid_argument("usage: persist <key>");
 }
 
-/* GetCommand */
+/* GetTTLCommand */
 void GetTTLCommand::execute(const std::vector<std::string> &cmd, 
 			RingBuffer<uint8_t> &buffer, CommandContext &ctx) {
 	ctx.ttl_manager.process_expired();
@@ -101,7 +101,7 @@ void GetTTLCommand::execute(const std::vector<std::string> &cmd,
 		throw std::invalid_argument("usage: ttl <key>");
 }
 
-/* GetCommand */
+/* ZAddCommand */
 void ZAddCommand::execute(const std::vector<std::string> &cmd,
 			RingBuffer<uint8_t> &buffer, CommandContext &ctx) {
 	if (cmd.size() >= 3) {
@@ -123,7 +123,7 @@ void ZAddCommand::execute(const std::vector<std::string> &cmd,
 		throw std::invalid_argument("usage: zadd <key> <score>");
 }
 
-/* GetCommand */
+/* ZRemCommand */
 void ZRemCommand::execute(const std::vector<std::string> &cmd, 
 			RingBuffer<uint8_t> &buffer, CommandContext &ctx) {
 	if (cmd.size() >= 2) {
@@ -136,7 +136,7 @@ void ZRemCommand::execute(const std::vector<std::string> &cmd,
 		throw std::invalid_argument("usage: zrem <key>");
 }
 
-/* GetCommand */
+/* ZRangeCommand */
 void ZRangeCommand::execute(const std::vector<std::string> &cmd, 
 			RingBuffer<uint8_t> &buffer, CommandContext &ctx) {
 	//TODO add an option to pass only beginning of the range
@@ -187,8 +187,8 @@ std::unique_ptr<Command> CommandFactory::create_command(const std::string &name)
 /* CommandExecutor */
 CommandExecutor::CommandExecutor() 
 	: hmap(HashMap<std::string, std::string>(hmap_base_capacity)),
-										sset(hmap_base_capacity),
-										ttl_manager(hmap) {}
+										ttl_manager(hmap),
+										sset(hmap_base_capacity) {}
 
 void CommandExecutor::do_query(const std::vector<std::string> &cmd, 
 									RingBuffer<uint8_t> &buffer) {
@@ -201,7 +201,7 @@ void CommandExecutor::do_query(const std::vector<std::string> &cmd,
 						= CommandFactory().create_command(cmd[0]);
 	try {
 		if (command) {
-			CommandContext ctx = {hmap, ttl_manager, sset};
+			CommandContext ctx(hmap, ttl_manager, sset);
 			command->execute(cmd, buffer, ctx);
 		}
 		else buffer.append_err(RES_NOCMD, "command doesn't exist");
